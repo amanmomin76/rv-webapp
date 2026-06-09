@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\EmployeeReport;
 use App\Models\Lead;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -76,6 +77,13 @@ class ExampleTest extends TestCase
             ->assertSee('Closest reminder first');
 
         $this->withSession($session)
+            ->get('/reports')
+            ->assertOk()
+            ->assertSee('Team Daily Reports')
+            ->assertSee('Neha Verma')
+            ->assertSee('Sanjay Patel');
+
+        $this->withSession($session)
             ->get('/employees')
             ->assertOk()
             ->assertSee('Manage your employees')
@@ -134,6 +142,7 @@ class ExampleTest extends TestCase
             ->get('/dashboard')
             ->assertOk()
             ->assertSee('MANAGER OVERVIEW')
+            ->assertSee('Reports')
             ->assertDontSee('Settings');
 
         $this->withSession(['crm_user_id' => $manager->id])
@@ -193,6 +202,7 @@ class ExampleTest extends TestCase
             ->get('/assign-leads')
             ->assertOk()
             ->assertSee('My Leads')
+            ->assertSee('Submit Report')
             ->assertSee('Work only on the leads assigned to you')
             ->assertSee('Neha Gupta')
             ->assertDontSee('Live Lead Intake')
@@ -222,5 +232,111 @@ class ExampleTest extends TestCase
                 'status' => 'Lost',
             ])
             ->assertForbidden();
+    }
+
+    public function test_agent_can_submit_daily_report(): void
+    {
+        $this->seed();
+
+        $agent = User::query()->where('email', 'neha.verma@leadflowcrm.com')->firstOrFail();
+
+        $this->withSession(['crm_user_id' => $agent->id])
+            ->get('/reports')
+            ->assertOk()
+            ->assertSee('Submit Daily Report')
+            ->assertSee('Rahul Sharma + Owner')
+            ->assertDontSee('Review status');
+
+        $this->withSession(['crm_user_id' => $agent->id])
+            ->post(route('reports.store'), [
+                'report_date' => '2026-06-09',
+                'work_started_at' => '09:15',
+                'work_ended_at' => '18:45',
+                'leads_contacted' => 6,
+                'follow_ups_completed' => 2,
+                'notes_added' => 3,
+                'quotations_shared' => 1,
+                'calls_made' => 7,
+                'whatsapp_messages' => 8,
+                'emails_sent' => 3,
+                'summary' => 'Updated assigned leads and shared quotation details.',
+                'issues' => 'One quotation needs manager confirmation.',
+                'tomorrow_plan' => 'Close pending customer confirmation.',
+            ])
+            ->assertSessionHas('report_saved')
+            ->assertRedirect();
+
+        $report = EmployeeReport::query()
+            ->where('user_id', $agent->id)
+            ->whereDate('report_date', '2026-06-09')
+            ->firstOrFail();
+
+        $this->assertSame($agent->manager_id, $report->manager_id);
+        $this->assertSame(6, $report->leads_contacted);
+        $this->assertSame('Submitted', $report->status);
+    }
+
+    public function test_manager_reviews_only_team_reports(): void
+    {
+        $this->seed();
+
+        $manager = User::query()->where('email', 'rahul.sharma@leadflowcrm.com')->firstOrFail();
+        $teamReport = EmployeeReport::query()
+            ->whereHas('employee', fn ($query) => $query->where('email', 'neha.verma@leadflowcrm.com'))
+            ->firstOrFail();
+        $outsideReport = EmployeeReport::query()
+            ->whereHas('employee', fn ($query) => $query->where('email', 'sanjay.patel@leadflowcrm.com'))
+            ->firstOrFail();
+
+        $this->withSession(['crm_user_id' => $manager->id])
+            ->get('/reports')
+            ->assertOk()
+            ->assertSee('Team Daily Reports')
+            ->assertSee('Neha Verma')
+            ->assertSee('Pooja Shah')
+            ->assertDontSee('Sanjay Patel');
+
+        $this->withSession(['crm_user_id' => $manager->id])
+            ->post(route('reports.review', ['report' => $teamReport->id]), [
+                'status' => 'Approved',
+                'manager_feedback' => 'Approved for today.',
+            ])
+            ->assertSessionHas('report_reviewed')
+            ->assertRedirect();
+
+        $this->assertSame('Approved', $teamReport->refresh()->status);
+        $this->assertSame('Approved for today.', $teamReport->manager_feedback);
+
+        $this->withSession(['crm_user_id' => $manager->id])
+            ->post(route('reports.review', ['report' => $outsideReport->id]), [
+                'status' => 'Reviewed',
+            ])
+            ->assertForbidden();
+    }
+
+    public function test_owner_can_review_all_employee_reports(): void
+    {
+        $this->seed();
+
+        $owner = User::query()->where('email', 'owner@leadflowcrm.com')->firstOrFail();
+        $outsideReport = EmployeeReport::query()
+            ->whereHas('employee', fn ($query) => $query->where('email', 'sanjay.patel@leadflowcrm.com'))
+            ->firstOrFail();
+
+        $this->withSession(['crm_user_id' => $owner->id])
+            ->get('/reports')
+            ->assertOk()
+            ->assertSee('Neha Verma')
+            ->assertSee('Sanjay Patel');
+
+        $this->withSession(['crm_user_id' => $owner->id])
+            ->post(route('reports.review', ['report' => $outsideReport->id]), [
+                'status' => 'Need clarification',
+                'manager_feedback' => 'Please add freight estimate status.',
+            ])
+            ->assertSessionHas('report_reviewed')
+            ->assertRedirect();
+
+        $this->assertSame('Need clarification', $outsideReport->refresh()->status);
     }
 }

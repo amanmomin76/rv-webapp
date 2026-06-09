@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Lead;
+use App\Models\EmployeeReport;
 use App\Models\Project;
 use App\Models\User;
 use App\Support\CrmDemoData;
@@ -210,6 +211,77 @@ class CrmController extends Controller
         ));
     }
 
+    public function reports(Request $request): View
+    {
+        $user = $this->currentUserOrFail($request);
+
+        return view('crm.reports', array_merge(
+            $this->demo->shell($user, 'reports'),
+            ['reports' => $this->demo->reports($user, $request->query())],
+        ));
+    }
+
+    public function storeReport(Request $request): RedirectResponse
+    {
+        $user = $this->currentUserOrFail($request);
+        abort_unless($this->isAgent($user), 403);
+
+        $validated = $request->validate([
+            'report_date' => ['required', 'date'],
+            'work_started_at' => ['nullable', 'date_format:H:i'],
+            'work_ended_at' => ['nullable', 'date_format:H:i'],
+            'leads_contacted' => ['required', 'integer', 'min:0', 'max:999'],
+            'follow_ups_completed' => ['required', 'integer', 'min:0', 'max:999'],
+            'notes_added' => ['required', 'integer', 'min:0', 'max:999'],
+            'quotations_shared' => ['required', 'integer', 'min:0', 'max:999'],
+            'calls_made' => ['required', 'integer', 'min:0', 'max:999'],
+            'whatsapp_messages' => ['required', 'integer', 'min:0', 'max:999'],
+            'emails_sent' => ['required', 'integer', 'min:0', 'max:999'],
+            'summary' => ['required', 'string', 'max:2000'],
+            'issues' => ['nullable', 'string', 'max:2000'],
+            'tomorrow_plan' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $reportDate = \Illuminate\Support\Carbon::parse($validated['report_date'])->startOfDay();
+
+        $report = EmployeeReport::query()
+            ->where('user_id', $user->id)
+            ->whereBetween('report_date', [
+                $reportDate->toDateString(),
+                $reportDate->copy()->endOfDay()->format('Y-m-d H:i:s'),
+            ])
+            ->first();
+
+        $report ??= new EmployeeReport([
+                'user_id' => $user->id,
+                'report_date' => $reportDate->toDateString(),
+        ]);
+
+        $report->fill([
+            ...$validated,
+            'manager_id' => $user->manager_id,
+            'status' => 'Submitted',
+            'manager_feedback' => null,
+        ])->save();
+
+        return back()->with('report_saved', 'Daily report submitted to your manager and owner.');
+    }
+
+    public function reviewReport(Request $request, EmployeeReport $report): RedirectResponse
+    {
+        $user = $this->currentUserOrFail($request);
+        abort_unless($this->canReviewReport($user, $report), 403);
+
+        $validated = $request->validate([
+            'status' => ['required', Rule::in(['Reviewed', 'Need clarification', 'Approved'])],
+            'manager_feedback' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $report->forceFill($validated)->save();
+
+        return back()->with('report_reviewed', $report->employee?->name.' report updated.');
+    }
+
     public function employees(Request $request): View
     {
         $user = $this->currentUserOrFail($request);
@@ -259,7 +331,7 @@ class CrmController extends Controller
         }
 
         if ($this->isManager($user)) {
-            return in_array($area, ['create-lead', 'projects', 'employees'], true);
+            return in_array($area, ['create-lead', 'projects', 'employees', 'reports'], true);
         }
 
         return false;
@@ -315,6 +387,22 @@ class CrmController extends Controller
         }
 
         return (int) $lead->assigned_to_user_id === (int) $user->id;
+    }
+
+    private function canReviewReport(User $user, EmployeeReport $report): bool
+    {
+        if ($this->isOwner($user)) {
+            return true;
+        }
+
+        if (! $this->isManager($user)) {
+            return false;
+        }
+
+        $report->loadMissing('employee');
+
+        return (int) $report->manager_id === (int) $user->id
+            || (int) $report->employee?->manager_id === (int) $user->id;
     }
 
     private function assignableUserIdsForManager(User $manager): array

@@ -6,6 +6,7 @@ use App\Models\FollowUp;
 use App\Models\Lead;
 use App\Models\LeadDocument;
 use App\Models\LeadNote;
+use App\Models\EmployeeReport;
 use App\Models\Project;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -19,6 +20,7 @@ class CrmDemoSeeder extends Seeder
     {
         Schema::disableForeignKeyConstraints();
 
+        EmployeeReport::query()->truncate();
         FollowUp::query()->truncate();
         LeadDocument::query()->truncate();
         LeadNote::query()->truncate();
@@ -270,6 +272,87 @@ class CrmDemoSeeder extends Seeder
                 'uploaded_at' => Carbon::parse($document['uploaded_at']),
                 'created_at' => Carbon::parse($document['uploaded_at']),
                 'updated_at' => Carbon::parse($document['uploaded_at']),
+            ]);
+        }
+
+        foreach ([
+                [
+                    'employee_email' => 'neha.verma@leadflowcrm.com',
+                    'report_date' => '2026-06-09',
+                    'work_started_at' => '09:30',
+                    'work_ended_at' => '18:40',
+                    'leads_contacted' => 4,
+                    'follow_ups_completed' => 1,
+                    'notes_added' => 2,
+                    'quotations_shared' => 1,
+                    'calls_made' => 5,
+                    'whatsapp_messages' => 7,
+                    'emails_sent' => 2,
+                    'summary' => 'Contacted assigned IndiaMART and website leads, shared one quotation, and updated customer notes for active follow-ups.',
+                    'issues' => 'One customer asked for revised delivery timing before confirming.',
+                    'tomorrow_plan' => 'Close the quotation clarification and follow up on pending sealing line video approval.',
+                    'status' => 'Submitted',
+                    'manager_feedback' => null,
+                ],
+                [
+                    'employee_email' => 'pooja.shah@leadflowcrm.com',
+                    'report_date' => '2026-06-08',
+                    'work_started_at' => '09:45',
+                    'work_ended_at' => '18:20',
+                    'leads_contacted' => 3,
+                    'follow_ups_completed' => 2,
+                    'notes_added' => 3,
+                    'quotations_shared' => 1,
+                    'calls_made' => 4,
+                    'whatsapp_messages' => 5,
+                    'emails_sent' => 3,
+                    'summary' => 'Completed production update follow-ups and sent the hybrid quotation pack to Nair Packaging.',
+                    'issues' => null,
+                    'tomorrow_plan' => 'Collect service visit approval and update project dispatch timeline.',
+                    'status' => 'Reviewed',
+                    'manager_feedback' => 'Good update. Add expected closure date in tomorrow report.',
+                ],
+                [
+                    'employee_email' => 'sanjay.patel@leadflowcrm.com',
+                    'report_date' => '2026-06-08',
+                    'work_started_at' => '10:00',
+                    'work_ended_at' => '18:35',
+                    'leads_contacted' => 5,
+                    'follow_ups_completed' => 1,
+                    'notes_added' => 2,
+                    'quotations_shared' => 2,
+                    'calls_made' => 6,
+                    'whatsapp_messages' => 4,
+                    'emails_sent' => 4,
+                    'summary' => 'Handled Alibaba RFQ leads, shared sample videos, and moved one dispatch confirmation forward.',
+                    'issues' => 'Customer is waiting for final freight estimate.',
+                    'tomorrow_plan' => 'Confirm freight estimate and schedule dispatch confirmation call.',
+                    'status' => 'Approved',
+                    'manager_feedback' => 'Approved. Keep freight update visible in follow ups.',
+                ],
+        ] as $report) {
+            $employee = $users[$report['employee_email']];
+
+            EmployeeReport::query()->create([
+                'user_id' => $employee->id,
+                'manager_id' => $employee->manager_id,
+                'report_date' => $report['report_date'],
+                'work_started_at' => $report['work_started_at'],
+                'work_ended_at' => $report['work_ended_at'],
+                'leads_contacted' => $report['leads_contacted'],
+                'follow_ups_completed' => $report['follow_ups_completed'],
+                'notes_added' => $report['notes_added'],
+                'quotations_shared' => $report['quotations_shared'],
+                'calls_made' => $report['calls_made'],
+                'whatsapp_messages' => $report['whatsapp_messages'],
+                'emails_sent' => $report['emails_sent'],
+                'summary' => $report['summary'],
+                'issues' => $report['issues'],
+                'tomorrow_plan' => $report['tomorrow_plan'],
+                'status' => $report['status'],
+                'manager_feedback' => $report['manager_feedback'],
+                'created_at' => Carbon::parse($report['report_date'].' '.$report['work_ended_at']),
+                'updated_at' => Carbon::parse($report['report_date'].' '.$report['work_ended_at'])->addMinutes(10),
             ]);
         }
     }

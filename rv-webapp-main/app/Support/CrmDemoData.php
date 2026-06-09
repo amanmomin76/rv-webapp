@@ -4,6 +4,8 @@ namespace App\Support;
 
 use App\Models\FollowUp;
 use App\Models\Lead;
+use App\Models\EmployeeReport;
+use App\Models\LeadNote;
 use App\Models\Project;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
@@ -21,6 +23,7 @@ class CrmDemoData
             'assign-leads' => ['title' => 'Assign Leads', 'subtitle' => 'Distribute incoming opportunities across the team'],
             'projects' => ['title' => 'Projects', 'subtitle' => 'Track project execution, pipeline stage, and ownership'],
             'follow-ups' => ['title' => 'Follow Ups', 'subtitle' => 'Keep upcoming reminders and customer actions visible'],
+            'reports' => ['title' => 'Reports', 'subtitle' => 'Submit, review, and approve daily employee work reports'],
             'employees' => ['title' => 'Employees & Reports', 'subtitle' => 'Review staff workload, ownership, and reporting'],
             'settings' => ['title' => 'Settings', 'subtitle' => 'Manage workspace preferences and system options'],
         ][$activeNav];
@@ -48,6 +51,7 @@ class CrmDemoData
             ['key' => 'assign-leads', 'label' => 'Assign Leads', 'abbr' => 'AL', 'route' => 'assign-leads.index', 'divider_before' => false],
             ['key' => 'projects', 'label' => 'Projects', 'abbr' => 'PR', 'route' => 'projects.index', 'divider_before' => false],
             ['key' => 'follow-ups', 'label' => 'Follow Ups', 'abbr' => 'FU', 'route' => 'follow-ups.index', 'divider_before' => false],
+            ['key' => 'reports', 'label' => 'Reports', 'abbr' => 'RP', 'route' => 'reports.index', 'divider_before' => false],
             ['key' => 'employees', 'label' => 'Employees & Reports', 'abbr' => 'EM', 'route' => 'employees.index', 'divider_before' => true],
             ['key' => 'settings', 'label' => 'Settings', 'abbr' => 'ST', 'route' => 'settings.index', 'divider_before' => false],
         ];
@@ -64,6 +68,7 @@ class CrmDemoData
                 ['key' => 'dashboard', 'label' => 'My Dashboard', 'abbr' => 'DB', 'route' => 'dashboard', 'divider_before' => false],
                 ['key' => 'assign-leads', 'label' => 'My Leads', 'abbr' => 'ML', 'route' => 'assign-leads.index', 'divider_before' => false],
                 ['key' => 'follow-ups', 'label' => 'My Follow Ups', 'abbr' => 'FU', 'route' => 'follow-ups.index', 'divider_before' => false],
+                ['key' => 'reports', 'label' => 'Submit Report', 'abbr' => 'SR', 'route' => 'reports.index', 'divider_before' => false],
             ];
         }
 
@@ -486,6 +491,124 @@ class CrmDemoData
         ];
     }
 
+    public function reports(User $user, array $filters = []): array
+    {
+        $search = trim((string) ($filters['search'] ?? ''));
+        $status = (string) ($filters['status'] ?? 'All Statuses');
+        $today = now()->toDateString();
+        $todayReport = EmployeeReport::query()
+            ->where('user_id', $user->id)
+            ->whereDate('report_date', $today)
+            ->first();
+
+        $query = $this->visibleReportQuery($user)->with(['employee.manager', 'manager']);
+
+        if ($status !== 'All Statuses') {
+            $query->where('status', $status);
+        }
+
+        if ($search !== '') {
+            $query->where(function (Builder $builder) use ($search): void {
+                $builder
+                    ->where('summary', 'like', "%{$search}%")
+                    ->orWhere('issues', 'like', "%{$search}%")
+                    ->orWhere('tomorrow_plan', 'like', "%{$search}%")
+                    ->orWhereHas('employee', fn (Builder $subQuery) => $subQuery->where('name', 'like', "%{$search}%")->orWhere('email', 'like', "%{$search}%"))
+                    ->orWhereHas('manager', fn (Builder $subQuery) => $subQuery->where('name', 'like', "%{$search}%"));
+            });
+        }
+
+        $rows = $query
+            ->orderByDesc('report_date')
+            ->orderByDesc('created_at')
+            ->get()
+            ->map(fn (EmployeeReport $report): array => $this->mapReport($report))
+            ->values()
+            ->all();
+
+        $assignedLeads = $this->visibleLeadQuery($user)->count();
+        $pendingFollowUps = $this->visibleFollowUpQuery($user)->where('status', '!=', 'Completed')->count();
+        $completedToday = $this->visibleFollowUpQuery($user)
+            ->where('status', 'Completed')
+            ->whereDate('completed_at', $today)
+            ->count();
+        $notesToday = LeadNote::query()
+            ->where('author_user_id', $user->id)
+            ->whereDate('created_at', $today)
+            ->count();
+
+        $reportCount = $this->visibleReportQuery($user)->count();
+        $waitingReview = $this->visibleReportQuery($user)->where('status', 'Submitted')->count();
+        $approvedCount = $this->visibleReportQuery($user)->where('status', 'Approved')->count();
+
+        return [
+            'title' => $this->isAgent($user) ? 'Submit Daily Report' : 'Team Daily Reports',
+            'subtitle' => $this->isAgent($user)
+                ? 'Share your working-hour activity with your manager and owner.'
+                : 'Review employee reports, give feedback, and approve daily output.',
+            'is_agent' => $this->isAgent($user),
+            'can_review' => ! $this->isAgent($user),
+            'manager_name' => $user->manager?->name ?? 'Owner Admin',
+            'filters' => [
+                'search' => $filters['search'] ?? '',
+                'status' => $status,
+            ],
+            'status_options' => ['All Statuses', 'Submitted', 'Reviewed', 'Need clarification', 'Approved'],
+            'review_status_options' => ['Reviewed', 'Need clarification', 'Approved'],
+            'summary_cards' => [
+                [
+                    'label' => $this->isAgent($user) ? 'Assigned Leads' : 'Reports Submitted',
+                    'value' => number_format($this->isAgent($user) ? $assignedLeads : $reportCount),
+                    'detail' => $this->isAgent($user) ? 'Visible in My Leads' : 'Visible in your workspace',
+                ],
+                [
+                    'label' => $this->isAgent($user) ? 'Pending Follow Ups' : 'Waiting Review',
+                    'value' => number_format($this->isAgent($user) ? $pendingFollowUps : $waitingReview),
+                    'detail' => $this->isAgent($user) ? 'Open customer actions' : 'Submitted by employees',
+                ],
+                [
+                    'label' => $this->isAgent($user) ? 'Reports Sent' : 'Approved Reports',
+                    'value' => number_format($this->isAgent($user) ? $reportCount : $approvedCount),
+                    'detail' => $this->isAgent($user) ? 'Your total report history' : 'Closed by manager/owner',
+                ],
+            ],
+            'auto_metrics' => [
+                'assigned_leads' => $assignedLeads,
+                'pending_follow_ups' => $pendingFollowUps,
+                'completed_follow_ups_today' => $completedToday,
+                'notes_added_today' => $notesToday,
+            ],
+            'form' => [
+                'report_date' => $this->formatDateInput($todayReport?->report_date ?? $today),
+                'work_started_at' => $this->formatTimeInput($todayReport?->work_started_at, '09:30'),
+                'work_ended_at' => $this->formatTimeInput($todayReport?->work_ended_at, '18:30'),
+                'leads_contacted' => $todayReport?->leads_contacted ?? 0,
+                'follow_ups_completed' => $todayReport?->follow_ups_completed ?? $completedToday,
+                'notes_added' => $todayReport?->notes_added ?? $notesToday,
+                'quotations_shared' => $todayReport?->quotations_shared ?? 0,
+                'calls_made' => $todayReport?->calls_made ?? 0,
+                'whatsapp_messages' => $todayReport?->whatsapp_messages ?? 0,
+                'emails_sent' => $todayReport?->emails_sent ?? 0,
+                'summary' => $todayReport?->summary ?? '',
+                'issues' => $todayReport?->issues ?? '',
+                'tomorrow_plan' => $todayReport?->tomorrow_plan ?? '',
+                'status' => $todayReport?->status ?? 'Not submitted',
+                'manager_feedback' => $todayReport?->manager_feedback,
+            ],
+            'rows' => $rows,
+            'recent_reports' => $this->visibleReportQuery($user)
+                ->with(['employee.manager', 'manager'])
+                ->where('user_id', $user->id)
+                ->orderByDesc('report_date')
+                ->limit(5)
+                ->get()
+                ->map(fn (EmployeeReport $report): array => $this->mapReport($report))
+                ->values()
+                ->all(),
+            'count_summary' => count($rows).' reports visible',
+        ];
+    }
+
     public function employees(User $user): array
     {
         $rows = $this->visibleTeamQuery($user)
@@ -727,6 +850,41 @@ class CrmDemoData
             'initials' => $this->initials($project->project_name),
             'po_tone' => $this->statusTone($project->po_status),
             'project_tone' => $this->statusTone($project->project_status),
+        ];
+    }
+
+    private function mapReport(EmployeeReport $report): array
+    {
+        $activityTotal = $report->leads_contacted
+            + $report->follow_ups_completed
+            + $report->notes_added
+            + $report->quotations_shared
+            + $report->calls_made
+            + $report->whatsapp_messages
+            + $report->emails_sent;
+
+        return [
+            'id' => $report->id,
+            'employee' => $report->employee?->name ?? 'Unknown employee',
+            'employee_email' => $report->employee?->email ?? 'Not available',
+            'manager' => $report->manager?->name ?? $report->employee?->manager?->name ?? 'Owner/Admin',
+            'report_date' => $this->formatDate($report->report_date),
+            'submitted_on' => $this->formatDateTime($report->updated_at),
+            'hours' => $this->formatTimeRange($report->work_started_at, $report->work_ended_at),
+            'leads_contacted' => $report->leads_contacted,
+            'follow_ups_completed' => $report->follow_ups_completed,
+            'notes_added' => $report->notes_added,
+            'quotations_shared' => $report->quotations_shared,
+            'calls_made' => $report->calls_made,
+            'whatsapp_messages' => $report->whatsapp_messages,
+            'emails_sent' => $report->emails_sent,
+            'activity_total' => $activityTotal,
+            'summary' => $report->summary ?: 'No summary added.',
+            'issues' => $report->issues ?: 'No blockers reported.',
+            'tomorrow_plan' => $report->tomorrow_plan ?: 'No plan added.',
+            'status' => $report->status,
+            'status_tone' => $this->statusTone($report->status),
+            'manager_feedback' => $report->manager_feedback,
         ];
     }
 
@@ -1120,6 +1278,25 @@ class CrmDemoData
         });
     }
 
+    private function visibleReportQuery(User $user): Builder
+    {
+        $query = EmployeeReport::query();
+
+        if ($this->isOwner($user)) {
+            return $query;
+        }
+
+        if ($this->isManager($user)) {
+            return $query->where(function (Builder $builder) use ($user): void {
+                $builder
+                    ->where('manager_id', $user->id)
+                    ->orWhereHas('employee', fn (Builder $employeeQuery) => $employeeQuery->where('manager_id', $user->id));
+            });
+        }
+
+        return $query->where('user_id', $user->id);
+    }
+
     private function visibleTeamQuery(User $user): Builder
     {
         $query = User::query()->with('manager');
@@ -1232,6 +1409,11 @@ class CrmDemoData
         return Carbon::parse($value)->format('d M Y');
     }
 
+    private function formatDateInput(mixed $value): string
+    {
+        return $value ? Carbon::parse($value)->format('Y-m-d') : now()->toDateString();
+    }
+
     private function formatDateTime(mixed $value): string
     {
         if (! $value) {
@@ -1248,6 +1430,20 @@ class CrmDemoData
         }
 
         return Carbon::parse($value)->format('h:i A');
+    }
+
+    private function formatTimeInput(mixed $value, string $default = ''): string
+    {
+        return $value ? Carbon::parse($value)->format('H:i') : $default;
+    }
+
+    private function formatTimeRange(mixed $start, mixed $end): string
+    {
+        if (! $start && ! $end) {
+            return 'Not added';
+        }
+
+        return $this->formatTime($start).' - '.$this->formatTime($end);
     }
 
     private function trendText(int|float $current, int|float $previous): string
@@ -1324,6 +1520,10 @@ class CrmDemoData
             'Interested' => 'amber',
             'Negotiation' => 'violet',
             'PO Received', 'In Production', 'Dispatch Ready', 'Completed', 'Active' => 'green',
+            'Approved' => 'green',
+            'Submitted' => 'blue',
+            'Reviewed' => 'violet',
+            'Need clarification' => 'amber',
             'Pending' => 'amber',
             'Due Soon' => 'rose',
             'Lost', 'Inactive' => 'rose',

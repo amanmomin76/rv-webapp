@@ -18,6 +18,7 @@ class CrmSchemaTest extends TestCase
         $this->assertTrue(Schema::hasTable('follow_ups'));
         $this->assertTrue(Schema::hasTable('lead_notes'));
         $this->assertTrue(Schema::hasTable('lead_documents'));
+        $this->assertTrue(Schema::hasTable('employee_reports'));
     }
 
     public function test_user_team_columns_exist(): void
@@ -66,6 +67,26 @@ class CrmSchemaTest extends TestCase
             'type',
             'status',
             'due_at',
+        ]));
+
+        $this->assertTrue(Schema::hasColumns('employee_reports', [
+            'user_id',
+            'manager_id',
+            'report_date',
+            'work_started_at',
+            'work_ended_at',
+            'leads_contacted',
+            'follow_ups_completed',
+            'notes_added',
+            'quotations_shared',
+            'calls_made',
+            'whatsapp_messages',
+            'emails_sent',
+            'summary',
+            'issues',
+            'tomorrow_plan',
+            'status',
+            'manager_feedback',
         ]));
     }
 }

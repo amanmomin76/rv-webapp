@@ -1132,6 +1132,89 @@ button {
     font-weight: 600;
 }
 
+.report-summary-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+    margin-top: 18px;
+}
+
+.report-summary-card {
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px solid #1e3148;
+    background: #0b1420;
+}
+
+.report-summary-card span,
+.report-snapshot-list span,
+.report-table small {
+    display: block;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.report-summary-card strong {
+    display: block;
+    margin-top: 8px;
+    font-size: 28px;
+    color: var(--text);
+}
+
+.report-summary-card p {
+    margin: 8px 0 0;
+    font-size: 12px;
+    color: var(--muted);
+}
+
+.report-metric-inputs {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.report-snapshot-list {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.report-snapshot-list div {
+    padding: 16px;
+    border-radius: 16px;
+    border: 1px solid #1e3148;
+    background: #111d2d;
+}
+
+.report-snapshot-list strong {
+    display: block;
+    margin-top: 8px;
+    font-size: 24px;
+    color: var(--text);
+}
+
+.report-table td {
+    vertical-align: top;
+}
+
+.report-table strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.report-review-form {
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.report-review-form .crm-textarea {
+    min-height: 72px;
+    font-size: 12px;
+}
+
 .assignment-overview {
     margin-bottom: 14px;
 }

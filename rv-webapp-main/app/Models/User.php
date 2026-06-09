@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\Cast;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -49,7 +50,7 @@ class User extends Authenticatable
         return $this->hasMany(Lead::class, 'assigned_to_user_id');
     }
 
-    public function manager()
+    public function manager(): BelongsTo
     {
         return $this->belongsTo(User::class, 'manager_id');
     }
@@ -82,5 +83,15 @@ class User extends Authenticatable
     public function leadDocuments(): HasMany
     {
         return $this->hasMany(LeadDocument::class, 'uploaded_by_user_id');
+    }
+
+    public function employeeReports(): HasMany
+    {
+        return $this->hasMany(EmployeeReport::class, 'user_id');
+    }
+
+    public function managedEmployeeReports(): HasMany
+    {
+        return $this->hasMany(EmployeeReport::class, 'manager_id');
     }
 }
