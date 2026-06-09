@@ -32,7 +32,9 @@
 
             <div class="toolbar-actions">
                 <button class="secondary-button" type="submit">Apply Filters</button>
-                <a class="primary-button" href="{{ route('leads.create') }}">+ Add Project</a>
+                @if ($projects['can_add_project'])
+                    <a class="primary-button" href="{{ route('leads.create') }}">+ Add Project</a>
+                @endif
                 <a class="{{ $projects['tab'] === 'completed' ? 'success-button' : 'ghost-button' }}" href="{{ route('projects.index', ['tab' => 'completed']) }}">Completed Projects</a>
                 <a class="{{ $projects['tab'] === 'active' ? 'secondary-button' : 'ghost-button' }}" href="{{ route('projects.index', ['tab' => 'active']) }}">Projects List</a>
             </div>

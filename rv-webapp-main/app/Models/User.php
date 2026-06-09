@@ -18,6 +18,7 @@ use Illuminate\Notifications\Notifiable;
     'password',
     'phone',
     'role',
+    'manager_id',
     'employment_status',
     'joined_at',
     'performance_percent',
@@ -46,6 +47,16 @@ class User extends Authenticatable
     public function assignedLeads(): HasMany
     {
         return $this->hasMany(Lead::class, 'assigned_to_user_id');
+    }
+
+    public function manager()
+    {
+        return $this->belongsTo(User::class, 'manager_id');
+    }
+
+    public function teamMembers(): HasMany
+    {
+        return $this->hasMany(User::class, 'manager_id');
     }
 
     public function managedLeads(): HasMany

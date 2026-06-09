@@ -7,7 +7,9 @@
                 <h4>Manage your employees</h4>
                 <p>{{ $employees['body'] }}</p>
             </div>
-            <button class="primary-button" type="button">+ Add Employee</button>
+            @if ($employees['can_add_employee'])
+                <button class="primary-button" type="button">+ Add Employee</button>
+            @endif
         </div>
 
         <div class="crm-table-wrap">
@@ -19,6 +21,8 @@
                         <th>Email</th>
                         <th>Phone</th>
                         <th>Role</th>
+                        <th>Manager</th>
+                        <th>Leads</th>
                         <th>Status</th>
                         <th>Joined Date</th>
                     </tr>
@@ -31,6 +35,8 @@
                             <td>{{ $row['email'] }}</td>
                             <td>{{ $row['phone'] }}</td>
                             <td>{{ $row['role'] }}</td>
+                            <td>{{ $row['manager'] }}</td>
+                            <td>{{ $row['lead_count'] }}</td>
                             <td><span class="status-pill status-pill--{{ $row['status_tone'] }}">{{ $row['status'] }}</span></td>
                             <td>{{ $row['joined_date'] }}</td>
                         </tr>

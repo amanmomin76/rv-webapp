@@ -20,6 +20,15 @@ class CrmSchemaTest extends TestCase
         $this->assertTrue(Schema::hasTable('lead_documents'));
     }
 
+    public function test_user_team_columns_exist(): void
+    {
+        $this->assertTrue(Schema::hasColumns('users', [
+            'role',
+            'manager_id',
+            'employment_status',
+        ]));
+    }
+
     public function test_core_lead_and_project_columns_exist(): void
     {
         $this->assertTrue(Schema::hasColumns('leads', [

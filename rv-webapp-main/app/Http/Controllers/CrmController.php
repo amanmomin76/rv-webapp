@@ -2,8 +2,9 @@
 
 namespace App\Http\Controllers;
 
-use App\Models\User;
 use App\Models\Lead;
+use App\Models\Project;
+use App\Models\User;
 use App\Support\CrmDemoData;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -76,7 +77,7 @@ class CrmController extends Controller
 
         return view('crm.dashboard', array_merge(
             $this->demo->shell($user, 'dashboard'),
-            ['dashboard' => $this->demo->dashboard()],
+            ['dashboard' => $this->demo->dashboard($user)],
         ));
     }
 
@@ -86,13 +87,44 @@ class CrmController extends Controller
 
         return view('crm.assign-leads', array_merge(
             $this->demo->shell($user, 'assign-leads'),
-            ['assignLeads' => $this->demo->assignLeads($request->query())],
+            ['assignLeads' => $this->demo->assignLeads($user, $request->query())],
         ));
     }
 
     public function updateLeadAssignment(Request $request, Lead $lead): RedirectResponse
     {
-        $this->currentUserOrFail($request);
+        $user = $this->currentUserOrFail($request);
+
+        abort_unless($this->canAccessLead($user, $lead), 403);
+
+        if ($this->isAgent($user)) {
+            $validated = $request->validate([
+                'status' => ['required', 'string', 'max:64'],
+            ]);
+
+            $lead->forceFill([
+                'status' => $validated['status'],
+            ])->save();
+
+            return back()->with('assignment_updated', $lead->lead_code.' status updated.');
+        }
+
+        if ($this->isManager($user)) {
+            $assignableUserIds = $this->assignableUserIdsForManager($user);
+
+            $validated = $request->validate([
+                'assigned_to_user_id' => ['nullable', 'integer', Rule::in($assignableUserIds)],
+                'status' => ['required', 'string', 'max:64'],
+            ]);
+
+            $lead->forceFill([
+                'manager_user_id' => $user->id,
+                'assigned_to_user_id' => $validated['assigned_to_user_id'] ?? null,
+                'status' => $validated['status'],
+            ])->save();
+
+            return back()->with('assignment_updated', $lead->lead_code.' assignment updated.');
+        }
 
         $validated = $request->validate([
             'manager_user_id' => [
@@ -120,6 +152,7 @@ class CrmController extends Controller
     public function createLead(Request $request): View
     {
         $user = $this->currentUserOrFail($request);
+        abort_unless($this->canAccessArea($user, 'create-lead'), 403);
 
         return view('crm.add-lead', array_merge(
             $this->demo->shell(
@@ -137,6 +170,8 @@ class CrmController extends Controller
         $origin = (string) $request->query('origin', 'leads');
         $projectId = $request->query('project');
         $user = $this->currentUserOrFail($request);
+        abort_unless($this->canAccessLeadCode($user, $leadId, is_string($projectId) ? $projectId : null), 403);
+
         $activeNav = match ($origin) {
             'projects', 'completed-projects' => 'projects',
             'follow-ups' => 'follow-ups',
@@ -150,17 +185,18 @@ class CrmController extends Controller
                 sectionTitle: 'Lead Details',
                 sectionSubtitle: 'Review complete lead history and customer context',
             ),
-            ['leadDetails' => $this->demo->leadDetail($leadId, $origin, is_string($projectId) ? $projectId : null)],
+            ['leadDetails' => $this->demo->leadDetail($user, $leadId, $origin, is_string($projectId) ? $projectId : null)],
         ));
     }
 
     public function projects(Request $request): View
     {
         $user = $this->currentUserOrFail($request);
+        abort_unless($this->canAccessArea($user, 'projects'), 403);
 
         return view('crm.projects', array_merge(
             $this->demo->shell($user, 'projects'),
-            ['projects' => $this->demo->projects($request->query())],
+            ['projects' => $this->demo->projects($user, $request->query())],
         ));
     }
 
@@ -170,23 +206,25 @@ class CrmController extends Controller
 
         return view('crm.follow-ups', array_merge(
             $this->demo->shell($user, 'follow-ups'),
-            ['followUps' => $this->demo->followUps($request->query())],
+            ['followUps' => $this->demo->followUps($user, $request->query())],
         ));
     }
 
     public function employees(Request $request): View
     {
         $user = $this->currentUserOrFail($request);
+        abort_unless($this->canAccessArea($user, 'employees'), 403);
 
         return view('crm.employees', array_merge(
             $this->demo->shell($user, 'employees'),
-            ['employees' => $this->demo->employees()],
+            ['employees' => $this->demo->employees($user)],
         ));
     }
 
     public function settings(Request $request): View
     {
         $user = $this->currentUserOrFail($request);
+        abort_unless($this->canAccessArea($user, 'settings'), 403);
 
         return view('crm.settings', array_merge(
             $this->demo->shell($user, 'settings'),
@@ -212,5 +250,94 @@ class CrmController extends Controller
         abort_unless($user, 401);
 
         return $user;
+    }
+
+    private function canAccessArea(User $user, string $area): bool
+    {
+        if ($this->isOwner($user)) {
+            return true;
+        }
+
+        if ($this->isManager($user)) {
+            return in_array($area, ['create-lead', 'projects', 'employees'], true);
+        }
+
+        return false;
+    }
+
+    private function canAccessLeadCode(User $user, string $leadCode, ?string $projectCode = null): bool
+    {
+        if ($projectCode) {
+            $project = Project::query()
+                ->with(['lead.assignedTo'])
+                ->where('project_code', $projectCode)
+                ->first();
+
+            return $project ? $this->canAccessProject($user, $project) : false;
+        }
+
+        $lead = Lead::query()
+            ->with('assignedTo')
+            ->where('lead_code', $leadCode)
+            ->first();
+
+        return $lead ? $this->canAccessLead($user, $lead) : false;
+    }
+
+    private function canAccessProject(User $user, Project $project): bool
+    {
+        if ($this->isOwner($user)) {
+            return true;
+        }
+
+        $project->loadMissing(['lead.assignedTo']);
+
+        if ($this->isManager($user)) {
+            return (int) $project->owner_id === (int) $user->id
+                || ($project->lead && $this->canAccessLead($user, $project->lead));
+        }
+
+        return $project->lead && $this->canAccessLead($user, $project->lead);
+    }
+
+    private function canAccessLead(User $user, Lead $lead): bool
+    {
+        if ($this->isOwner($user)) {
+            return true;
+        }
+
+        $lead->loadMissing('assignedTo');
+
+        if ($this->isManager($user)) {
+            return (int) $lead->manager_user_id === (int) $user->id
+                || (int) $lead->assigned_to_user_id === (int) $user->id
+                || (int) $lead->assignedTo?->manager_id === (int) $user->id;
+        }
+
+        return (int) $lead->assigned_to_user_id === (int) $user->id;
+    }
+
+    private function assignableUserIdsForManager(User $manager): array
+    {
+        return User::query()
+            ->where('id', $manager->id)
+            ->orWhere('manager_id', $manager->id)
+            ->pluck('id')
+            ->all();
+    }
+
+    private function isOwner(User $user): bool
+    {
+        return $user->role === 'Admin/Owner';
+    }
+
+    private function isManager(User $user): bool
+    {
+        return $user->role === 'Manager';
+    }
+
+    private function isAgent(User $user): bool
+    {
+        return $user->role === 'Agent';
     }
 }

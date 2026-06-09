@@ -30,19 +30,20 @@ class CrmDemoData
             'workspaceVersion' => 'LeadFlow CRM v1.0',
             'workspaceSubtitle' => 'MySQL-backed Laravel workspace',
             'headerRangeLabel' => $user->role.' Workspace',
-            'headerRangeValue' => $this->headerRangeValue(),
+            'headerRangeValue' => $this->headerRangeValue($user),
             'currentUserName' => $user->name,
             'currentUserRole' => $user->role,
+            'currentUserInitials' => $this->initials($user->name),
             'activeNav' => $activeNav,
             'sectionTitle' => $sectionTitle ?? $defaults['title'],
             'sectionSubtitle' => $sectionSubtitle ?? $defaults['subtitle'],
-            'navigation' => $this->navigation(),
+            'navigation' => $this->navigation($user),
         ];
     }
 
-    public function navigation(): array
+    public function navigation(User $user): array
     {
-        return [
+        $items = [
             ['key' => 'dashboard', 'label' => 'Dashboard', 'abbr' => 'DB', 'route' => 'dashboard', 'divider_before' => false],
             ['key' => 'assign-leads', 'label' => 'Assign Leads', 'abbr' => 'AL', 'route' => 'assign-leads.index', 'divider_before' => false],
             ['key' => 'projects', 'label' => 'Projects', 'abbr' => 'PR', 'route' => 'projects.index', 'divider_before' => false],
@@ -50,9 +51,26 @@ class CrmDemoData
             ['key' => 'employees', 'label' => 'Employees & Reports', 'abbr' => 'EM', 'route' => 'employees.index', 'divider_before' => true],
             ['key' => 'settings', 'label' => 'Settings', 'abbr' => 'ST', 'route' => 'settings.index', 'divider_before' => false],
         ];
+
+        if ($this->isManager($user)) {
+            return collect($items)
+                ->reject(fn (array $item): bool => $item['key'] === 'settings')
+                ->values()
+                ->all();
+        }
+
+        if ($this->isAgent($user)) {
+            return [
+                ['key' => 'dashboard', 'label' => 'My Dashboard', 'abbr' => 'DB', 'route' => 'dashboard', 'divider_before' => false],
+                ['key' => 'assign-leads', 'label' => 'My Leads', 'abbr' => 'ML', 'route' => 'assign-leads.index', 'divider_before' => false],
+                ['key' => 'follow-ups', 'label' => 'My Follow Ups', 'abbr' => 'FU', 'route' => 'follow-ups.index', 'divider_before' => false],
+            ];
+        }
+
+        return $items;
     }
 
-    public function dashboard(): array
+    public function dashboard(User $user): array
     {
         $now = now();
         $currentMonthStart = $now->copy()->startOfMonth();
@@ -60,41 +78,41 @@ class CrmDemoData
         $previousMonthStart = $now->copy()->subMonthNoOverflow()->startOfMonth();
         $previousMonthEnd = $previousMonthStart->copy()->endOfMonth();
 
-        $totalLeads = Lead::query()->count();
-        $thisMonthLeads = Lead::query()
+        $totalLeads = $this->visibleLeadQuery($user)->count();
+        $thisMonthLeads = $this->visibleLeadQuery($user)
             ->whereBetween('inquiry_at', [$currentMonthStart, $currentMonthEnd])
             ->count();
-        $previousMonthLeads = Lead::query()
+        $previousMonthLeads = $this->visibleLeadQuery($user)
             ->whereBetween('inquiry_at', [$previousMonthStart, $previousMonthEnd])
             ->count();
 
-        $pendingFollowUps = FollowUp::query()
+        $pendingFollowUps = $this->visibleFollowUpQuery($user)
             ->where('status', '!=', 'Completed')
             ->count();
-        $dueBeforeNoon = FollowUp::query()
+        $dueBeforeNoon = $this->visibleFollowUpQuery($user)
             ->whereDate('due_at', $now->toDateString())
             ->whereTime('due_at', '<', '12:00:00')
             ->where('status', '!=', 'Completed')
             ->count();
 
-        $poReceived = Project::query()
+        $poReceived = $this->visibleProjectQuery($user)
             ->where('po_status', 'PO Received')
             ->count();
-        $poReceivedLastMonth = Project::query()
+        $poReceivedLastMonth = $this->visibleProjectQuery($user)
             ->where('po_status', 'PO Received')
             ->whereBetween('created_at', [$previousMonthStart, $previousMonthEnd])
             ->count();
 
-        $revenue = (float) Project::query()->sum('value_amount');
-        $previousRevenue = (float) Project::query()
+        $revenue = (float) $this->visibleProjectQuery($user)->sum('value_amount');
+        $previousRevenue = (float) $this->visibleProjectQuery($user)
             ->whereBetween('created_at', [$previousMonthStart, $previousMonthEnd])
             ->sum('value_amount');
 
-        $leadSources = $this->leadSources();
-        $trend = $this->leadTrend();
-        $topEmployees = User::query()
+        $leadSources = $this->leadSources($user);
+        $trend = $this->leadTrend($user);
+        $topEmployees = $this->visibleTeamQuery($user)
             ->whereIn('role', ['Manager', 'Agent'])
-            ->withCount('assignedLeads')
+            ->withCount(['assignedLeads' => fn (Builder $query) => $this->applyLeadVisibility($query, $user)])
             ->orderByDesc('assigned_leads_count')
             ->orderBy('name')
             ->limit(5)
@@ -113,10 +131,11 @@ class CrmDemoData
             ->all();
 
         return [
-            'title' => 'Dashboard',
-            'subtitle' => 'Overview of your business',
+            'kicker' => $this->dashboardKicker($user),
+            'title' => $this->dashboardTitle($user),
+            'subtitle' => $this->dashboardSubtitle($user),
             'date_range_label' => 'Date Range',
-            'date_range_text' => $this->dateRangeText(),
+            'date_range_text' => $this->dateRangeText($user),
             'metrics' => [
                 [
                     'icon' => 'TL',
@@ -148,7 +167,7 @@ class CrmDemoData
                     'label' => 'PO Received',
                     'value' => number_format($poReceived),
                     'trend' => $this->trendText($poReceived, $poReceivedLastMonth),
-                    'comparison' => Project::query()->where('project_status', 'Completed')->count().' closed projects',
+                    'comparison' => $this->visibleProjectQuery($user)->where('project_status', 'Completed')->count().' closed projects',
                 ],
                 [
                     'icon' => 'RV',
@@ -156,7 +175,7 @@ class CrmDemoData
                     'label' => 'Revenue',
                     'value' => $this->money($revenue),
                     'trend' => $this->moneyTrend($revenue, $previousRevenue),
-                    'comparison' => Project::query()->count().' tracked projects in pipeline',
+                    'comparison' => $this->visibleProjectQuery($user)->count().' tracked projects in pipeline',
                 ],
             ],
             'sources' => $leadSources,
@@ -165,7 +184,7 @@ class CrmDemoData
         ];
     }
 
-    public function assignLeads(array $filters = []): array
+    public function assignLeads(User $user, array $filters = []): array
     {
         $search = trim((string) ($filters['search'] ?? ''));
         $source = (string) ($filters['source'] ?? 'All Sources');
@@ -173,7 +192,7 @@ class CrmDemoData
         $manager = (string) ($filters['manager'] ?? 'All Managers');
         $owner = (string) ($filters['owner'] ?? 'All Owners');
 
-        $query = Lead::query()->with(['manager', 'assignedTo']);
+        $query = $this->visibleLeadQuery($user)->with(['manager', 'assignedTo']);
 
         if ($search !== '') {
             $query->where(function (Builder $builder) use ($search): void {
@@ -239,15 +258,25 @@ class CrmDemoData
                 'manager' => $manager,
                 'owner' => $owner,
             ],
-            'source_options' => array_merge(['All Sources'], $this->distinctLeadValues('source')),
+            'source_options' => array_merge(['All Sources'], $this->distinctVisibleLeadValues($user, 'source')),
             'status_options' => array_merge(['All Statuses'], $this->leadStatusOptions()),
-            'manager_options' => array_merge(['All Managers'], $this->distinctManagerNames()),
-            'owner_options' => array_merge(['All Owners'], $this->distinctOwnerNames()),
-            'manager_users' => $this->teamOptions(['Manager']),
-            'employee_users' => $this->teamOptions(['Manager', 'Agent']),
-            'integration_cards' => $this->integrationCards(),
-            'assignment_flow' => $this->assignmentFlow(),
+            'manager_options' => array_merge(['All Managers'], $this->distinctManagerNames($user)),
+            'owner_options' => array_merge(['All Owners'], $this->distinctOwnerNames($user)),
+            'manager_users' => $this->managerOptions($user),
+            'employee_users' => $this->employeeOptions($user),
+            'integration_cards' => $this->integrationCards($user),
+            'assignment_flow' => $this->assignmentFlow($user),
             'routing_rules' => $this->routingRules(),
+            'can_view_intake' => ! $this->isAgent($user),
+            'can_view_routing_rules' => ! $this->isAgent($user),
+            'can_add_lead' => ! $this->isAgent($user),
+            'can_filter_manager' => ! $this->isAgent($user),
+            'can_filter_owner' => ! $this->isAgent($user),
+            'can_assign_manager' => $this->isOwner($user),
+            'can_assign_employee' => ! $this->isAgent($user),
+            'can_update_status' => true,
+            'assignment_title' => $this->isAgent($user) ? 'My Leads' : 'Leads List',
+            'assignment_subtitle' => $this->assignmentSubtitle($user),
             'count_summary' => count($rows).' leads visible',
         ];
     }
@@ -299,10 +328,10 @@ class CrmDemoData
         ];
     }
 
-    public function leadDetail(string $leadCode, string $origin = 'leads', ?string $projectCode = null): array
+    public function leadDetail(User $user, string $leadCode, string $origin = 'leads', ?string $projectCode = null): array
     {
         if (in_array($origin, ['projects', 'completed-projects'], true)) {
-            return $this->projectLeadDetail($projectCode, $origin);
+            return $this->projectLeadDetail($user, $projectCode, $origin);
         }
 
         $lead = Lead::query()
@@ -316,6 +345,7 @@ class CrmDemoData
             ->firstOrFail();
 
         return $this->buildLeadDetail(
+            user: $user,
             lead: $lead,
             origin: $origin,
             breadcrumbText: $origin === 'follow-ups' ? 'Follow Ups > Lead Details' : 'Leads > Lead Details',
@@ -324,14 +354,14 @@ class CrmDemoData
         );
     }
 
-    public function projects(array $filters = []): array
+    public function projects(User $user, array $filters = []): array
     {
         $search = trim((string) ($filters['search'] ?? ''));
         $status = (string) ($filters['status'] ?? 'All Statuses');
         $owner = (string) ($filters['owner'] ?? 'All Owners');
         $tab = (string) ($filters['tab'] ?? 'active');
 
-        $rowsQuery = Project::query()->with(['lead.assignedTo', 'owner']);
+        $rowsQuery = $this->visibleProjectQuery($user)->with(['lead.assignedTo', 'owner']);
 
         if ($tab === 'completed') {
             $rowsQuery->where('project_status', 'Completed');
@@ -378,7 +408,7 @@ class CrmDemoData
         $selectedCode = (string) ($filters['selected'] ?? ($rows->first()['project_id'] ?? ''));
         $selectedProject = $rows->firstWhere('project_id', $selectedCode) ?? $rows->first();
 
-        $completedCollection = Project::query()
+        $completedCollection = $this->visibleProjectQuery($user)
             ->with(['lead', 'owner'])
             ->where('project_status', 'Completed')
             ->orderByDesc('delivery_date')
@@ -394,19 +424,20 @@ class CrmDemoData
                 'owner' => $owner,
             ],
             'status_options' => array_merge(['All Statuses'], $this->projectStatusOptions()),
-            'owner_options' => array_merge(['All Owners'], $this->projectOwnerNames()),
-            'active_count_summary' => Project::query()->where('project_status', '!=', 'Completed')->count().' active projects',
-            'completed_count_summary' => Project::query()->where('project_status', 'Completed')->count().' completed projects',
+            'owner_options' => array_merge(['All Owners'], $this->projectOwnerNames($user)),
+            'active_count_summary' => $this->visibleProjectQuery($user)->where('project_status', '!=', 'Completed')->count().' active projects',
+            'completed_count_summary' => $this->visibleProjectQuery($user)->where('project_status', 'Completed')->count().' completed projects',
             'page_summary' => 'Showing '.$rows->count().' project records',
             'completed_cards' => $completedCollection->map(fn (Project $project): array => $this->mapProject($project))->all(),
+            'can_add_project' => ! $this->isAgent($user),
         ];
     }
 
-    public function followUps(array $filters = []): array
+    public function followUps(User $user, array $filters = []): array
     {
         $search = trim((string) ($filters['search'] ?? ''));
 
-        $query = FollowUp::query()->with(['lead', 'project', 'assignedTo']);
+        $query = $this->visibleFollowUpQuery($user)->with(['lead', 'project', 'assignedTo']);
 
         if ($search !== '') {
             $query->where(function (Builder $builder) use ($search): void {
@@ -445,18 +476,19 @@ class CrmDemoData
             ->all();
 
         return [
-            'subtitle' => 'Closest reminder first. Keep pending customer actions visible before they slip through the pipeline.',
+            'subtitle' => $this->isAgent($user)
+                ? 'Your assigned reminders and customer actions are listed closest due first.'
+                : 'Closest reminder first. Keep pending customer actions visible before they slip through the pipeline.',
             'filters' => ['search' => $filters['search'] ?? ''],
             'rows' => $rows,
             'count_summary' => count($rows).' follow ups visible',
+            'can_add_follow_up' => ! $this->isAgent($user),
         ];
     }
 
-    public function employees(): array
+    public function employees(User $user): array
     {
-        $roleOrder = ['Admin/Owner' => 0, 'Manager' => 1, 'Agent' => 2];
-
-        $rows = User::query()
+        $rows = $this->visibleTeamQuery($user)
             ->orderByRaw("CASE role WHEN 'Admin/Owner' THEN 0 WHEN 'Manager' THEN 1 ELSE 2 END")
             ->orderBy('name')
             ->get()
@@ -466,6 +498,8 @@ class CrmDemoData
                 'email' => $user->email,
                 'phone' => $user->phone ?? 'Not available',
                 'role' => $user->role,
+                'manager' => $user->manager?->name ?? 'Not assigned',
+                'lead_count' => $user->assignedLeads()->count(),
                 'status' => $user->employment_status,
                 'joined_date' => optional($user->joined_at)->format('d M Y') ?? 'Not set',
                 'status_tone' => Str::lower($user->employment_status) === 'active' ? 'success' : 'rose',
@@ -475,8 +509,11 @@ class CrmDemoData
 
         return [
             'title' => 'Employees',
-            'body' => 'Employee management is now pulling directly from the users table and the seeded role hierarchy.',
+            'body' => $this->isOwner($user)
+                ? 'Owner view includes all managers, agents, status, and reporting.'
+                : 'Manager view includes your team and their current lead load.',
             'rows' => $rows,
+            'can_add_employee' => $this->isOwner($user),
         ];
     }
 
@@ -502,7 +539,7 @@ class CrmDemoData
         ];
     }
 
-    private function projectLeadDetail(?string $projectCode, string $origin): array
+    private function projectLeadDetail(User $user, ?string $projectCode, string $origin): array
     {
         $project = Project::query()
             ->with([
@@ -516,6 +553,7 @@ class CrmDemoData
             ->firstOrFail();
 
         return $this->buildLeadDetail(
+            user: $user,
             lead: $project->lead,
             origin: $origin,
             breadcrumbText: $origin === 'completed-projects' ? 'Completed Projects > Project Details' : 'Projects > Project Details',
@@ -532,6 +570,7 @@ class CrmDemoData
     }
 
     private function buildLeadDetail(
+        User $user,
         Lead $lead,
         string $origin,
         string $breadcrumbText,
@@ -545,7 +584,7 @@ class CrmDemoData
         ?string $subtitle = null,
         ?Collection $followUps = null,
     ): array {
-        $lead->loadMissing(['assignedTo', 'followUps.assignedTo', 'notes.author', 'documents.uploadedBy']);
+        $lead->loadMissing(['manager', 'assignedTo', 'followUps.assignedTo', 'notes.author', 'documents.uploadedBy']);
 
         $followUps = ($followUps ?? $lead->followUps)
             ->sortBy('due_at')
@@ -612,6 +651,10 @@ class CrmDemoData
             'breadcrumb_text' => $breadcrumbText,
             'back_text' => $backText,
             'back_route' => $backRoute,
+            'can_edit_lead' => ! $this->isAgent($user),
+            'can_assign_project' => ! $this->isAgent($user),
+            'can_add_follow_up' => ! $this->isAgent($user),
+            'can_upload_document' => ! $this->isAgent($user),
             'current_lead' => [
                 'lead_name' => $title ?? $lead->customer_name,
                 'lead_subtitle' => $subtitle ?? ($lead->company_name ?: 'No company'),
@@ -633,6 +676,7 @@ class CrmDemoData
                 'requirement_delivery' => $lead->requirement_delivery ?? 'Not specified',
                 'requirement_category' => $lead->requirement_category ?? 'Not specified',
                 'lead_id' => $lead->lead_code,
+                'lead_manager' => $lead->manager?->name ?? 'Not assigned',
                 'lead_assigned_to' => $lead->assignedTo?->name ?? 'Unassigned',
                 'lead_created_on' => $this->formatDate($lead->created_at),
                 'lead_inquiry_date' => $this->formatDateTime($lead->inquiry_at),
@@ -686,9 +730,9 @@ class CrmDemoData
         ];
     }
 
-    private function leadSources(): array
+    private function leadSources(User $user): array
     {
-        $counts = Lead::query()
+        $counts = $this->visibleLeadQuery($user)
             ->select('source')
             ->get()
             ->groupBy(fn (Lead $lead) => $lead->source ?: 'Others')
@@ -717,12 +761,12 @@ class CrmDemoData
             ->all();
     }
 
-    private function leadTrend(): array
+    private function leadTrend(User $user): array
     {
         $months = collect(range(5, 0))->map(fn (int $offset) => now()->copy()->startOfMonth()->subMonths($offset));
 
-        $counts = $months->map(function (Carbon $month): array {
-            $count = Lead::query()
+        $counts = $months->map(function (Carbon $month) use ($user): array {
+            $count = $this->visibleLeadQuery($user)
                 ->whereBetween('inquiry_at', [$month->copy()->startOfMonth(), $month->copy()->endOfMonth()])
                 ->count();
 
@@ -741,9 +785,9 @@ class CrmDemoData
         ])->all();
     }
 
-    private function integrationCards(): array
+    private function integrationCards(User $user): array
     {
-        $counts = Lead::query()
+        $counts = $this->visibleLeadQuery($user)
             ->select('source')
             ->get()
             ->groupBy(fn (Lead $lead) => $lead->source ?: 'Other')
@@ -781,28 +825,28 @@ class CrmDemoData
         ])->all();
     }
 
-    private function assignmentFlow(): array
+    private function assignmentFlow(User $user): array
     {
         return [
             [
                 'step' => 'Capture',
                 'label' => 'Live source intake',
-                'value' => Lead::query()->whereNotNull('external_source_id')->count().' platform refs',
+                'value' => $this->visibleLeadQuery($user)->whereNotNull('external_source_id')->count().' platform refs',
             ],
             [
                 'step' => 'Manager',
                 'label' => 'Admin routes lead',
-                'value' => Lead::query()->whereNotNull('manager_user_id')->count().' manager-owned',
+                'value' => $this->visibleLeadQuery($user)->whereNotNull('manager_user_id')->count().' manager-owned',
             ],
             [
                 'step' => 'Employee',
                 'label' => 'Manager assigns team',
-                'value' => Lead::query()->whereNotNull('assigned_to_user_id')->count().' employee-owned',
+                'value' => $this->visibleLeadQuery($user)->whereNotNull('assigned_to_user_id')->count().' employee-owned',
             ],
             [
                 'step' => 'Follow-up',
                 'label' => 'Status and reminders',
-                'value' => FollowUp::query()->where('status', '!=', 'Completed')->count().' pending',
+                'value' => $this->visibleFollowUpQuery($user)->where('status', '!=', 'Completed')->count().' pending',
             ],
         ];
     }
@@ -874,6 +918,67 @@ class CrmDemoData
             ->all();
     }
 
+    private function managerOptions(User $user): array
+    {
+        if ($this->isOwner($user)) {
+            return $this->teamOptions(['Manager']);
+        }
+
+        if ($this->isManager($user)) {
+            return [[
+                'id' => $user->id,
+                'name' => $user->name,
+                'role' => $user->role,
+            ]];
+        }
+
+        return [];
+    }
+
+    private function employeeOptions(User $user): array
+    {
+        if ($this->isOwner($user)) {
+            return $this->teamOptions(['Manager', 'Agent']);
+        }
+
+        if ($this->isManager($user)) {
+            return User::query()
+                ->where(function (Builder $builder) use ($user): void {
+                    $builder
+                        ->where('id', $user->id)
+                        ->orWhere('manager_id', $user->id);
+                })
+                ->where('employment_status', 'Active')
+                ->orderByRaw("CASE role WHEN 'Manager' THEN 0 ELSE 1 END")
+                ->orderBy('name')
+                ->get(['id', 'name', 'role'])
+                ->map(fn (User $teamUser): array => [
+                    'id' => $teamUser->id,
+                    'name' => $teamUser->name,
+                    'role' => $teamUser->role,
+                ])
+                ->all();
+        }
+
+        return [[
+            'id' => $user->id,
+            'name' => $user->name,
+            'role' => $user->role,
+        ]];
+    }
+
+    private function distinctVisibleLeadValues(User $user, string $column): array
+    {
+        return $this->visibleLeadQuery($user)
+            ->whereNotNull($column)
+            ->distinct()
+            ->orderBy($column)
+            ->pluck($column)
+            ->filter()
+            ->values()
+            ->all();
+    }
+
     private function distinctLeadValues(string $column): array
     {
         return Lead::query()
@@ -886,8 +991,16 @@ class CrmDemoData
             ->all();
     }
 
-    private function distinctManagerNames(): array
+    private function distinctManagerNames(User $user): array
     {
+        if ($this->isAgent($user)) {
+            return [];
+        }
+
+        if ($this->isManager($user)) {
+            return [$user->name];
+        }
+
         return User::query()
             ->where('role', 'Manager')
             ->orderBy('name')
@@ -895,9 +1008,13 @@ class CrmDemoData
             ->all();
     }
 
-    private function distinctOwnerNames(): array
+    private function distinctOwnerNames(User $user): array
     {
-        return User::query()
+        if ($this->isAgent($user)) {
+            return [];
+        }
+
+        return $this->visibleTeamQuery($user)
             ->whereHas('assignedLeads')
             ->orderBy('name')
             ->pluck('name')
@@ -916,32 +1033,194 @@ class CrmDemoData
             ->all();
     }
 
-    private function projectOwnerNames(): array
+    private function projectOwnerNames(User $user): array
     {
-        return User::query()
+        return $this->visibleTeamQuery($user)
             ->whereHas('ownedProjects')
             ->orderBy('name')
             ->pluck('name')
             ->all();
     }
 
-    private function headerRangeValue(): string
+    private function headerRangeValue(User $user): string
     {
-        $latest = Lead::query()->max('inquiry_at');
+        $latest = $this->visibleLeadQuery($user)->max('inquiry_at');
 
         return $latest ? Carbon::parse($latest)->format('F Y') : now()->format('F Y');
     }
 
-    private function dateRangeText(): string
+    private function dateRangeText(User $user): string
     {
-        $min = Lead::query()->min('inquiry_at');
-        $max = Lead::query()->max('inquiry_at');
+        $min = $this->visibleLeadQuery($user)->min('inquiry_at');
+        $max = $this->visibleLeadQuery($user)->max('inquiry_at');
 
         if (! $min || ! $max) {
             return now()->format('d M Y');
         }
 
         return Carbon::parse($min)->format('d M Y').' - '.Carbon::parse($max)->format('d M Y');
+    }
+
+    private function visibleLeadQuery(User $user): Builder
+    {
+        return $this->applyLeadVisibility(Lead::query(), $user);
+    }
+
+    private function visibleProjectQuery(User $user): Builder
+    {
+        $query = Project::query();
+
+        if ($this->isOwner($user)) {
+            return $query;
+        }
+
+        if ($this->isManager($user)) {
+            $teamIds = $this->teamUserIds($user);
+
+            return $query->where(function (Builder $builder) use ($user, $teamIds): void {
+                $builder
+                    ->where('owner_id', $user->id)
+                    ->orWhereHas('lead', function (Builder $leadQuery) use ($user, $teamIds): void {
+                        $leadQuery
+                            ->where('manager_user_id', $user->id)
+                            ->orWhereIn('assigned_to_user_id', $teamIds);
+                    });
+            });
+        }
+
+        return $query->whereHas('lead', fn (Builder $leadQuery) => $leadQuery->where('assigned_to_user_id', $user->id));
+    }
+
+    private function visibleFollowUpQuery(User $user): Builder
+    {
+        $query = FollowUp::query();
+
+        if ($this->isOwner($user)) {
+            return $query;
+        }
+
+        if ($this->isManager($user)) {
+            $teamIds = $this->teamUserIds($user);
+
+            return $query->where(function (Builder $builder) use ($user, $teamIds): void {
+                $builder
+                    ->whereIn('assigned_to_user_id', $teamIds)
+                    ->orWhereHas('lead', function (Builder $leadQuery) use ($user, $teamIds): void {
+                        $leadQuery
+                            ->where('manager_user_id', $user->id)
+                            ->orWhereIn('assigned_to_user_id', $teamIds);
+                    });
+            });
+        }
+
+        return $query->where(function (Builder $builder) use ($user): void {
+            $builder
+                ->where('assigned_to_user_id', $user->id)
+                ->orWhereHas('lead', fn (Builder $leadQuery) => $leadQuery->where('assigned_to_user_id', $user->id));
+        });
+    }
+
+    private function visibleTeamQuery(User $user): Builder
+    {
+        $query = User::query()->with('manager');
+
+        if ($this->isOwner($user)) {
+            return $query;
+        }
+
+        if ($this->isManager($user)) {
+            return $query->where(function (Builder $builder) use ($user): void {
+                $builder
+                    ->where('id', $user->id)
+                    ->orWhere('manager_id', $user->id);
+            });
+        }
+
+        return $query->where('id', $user->id);
+    }
+
+    private function applyLeadVisibility(Builder $query, User $user): Builder
+    {
+        if ($this->isOwner($user)) {
+            return $query;
+        }
+
+        if ($this->isManager($user)) {
+            $teamIds = $this->teamUserIds($user);
+
+            return $query->where(function (Builder $builder) use ($user, $teamIds): void {
+                $builder
+                    ->where('manager_user_id', $user->id)
+                    ->orWhereIn('assigned_to_user_id', $teamIds);
+            });
+        }
+
+        return $query->where('assigned_to_user_id', $user->id);
+    }
+
+    private function teamUserIds(User $manager): array
+    {
+        if (! $this->isManager($manager)) {
+            return [$manager->id];
+        }
+
+        return User::query()
+            ->where('id', $manager->id)
+            ->orWhere('manager_id', $manager->id)
+            ->pluck('id')
+            ->all();
+    }
+
+    private function dashboardKicker(User $user): string
+    {
+        return match ($user->role) {
+            'Admin/Owner' => 'OWNER OVERVIEW',
+            'Manager' => 'MANAGER OVERVIEW',
+            'Agent' => 'MY WORK',
+            default => 'CRM OVERVIEW',
+        };
+    }
+
+    private function dashboardTitle(User $user): string
+    {
+        return match ($user->role) {
+            'Manager' => 'Team Dashboard',
+            'Agent' => 'My Dashboard',
+            default => 'Dashboard',
+        };
+    }
+
+    private function dashboardSubtitle(User $user): string
+    {
+        return match ($user->role) {
+            'Manager' => 'Your team leads, follow-ups, and project movement',
+            'Agent' => 'Your assigned leads, reminders, and active work',
+            default => 'Overview of your business',
+        };
+    }
+
+    private function assignmentSubtitle(User $user): string
+    {
+        return match ($user->role) {
+            'Manager' => 'Assign your manager-owned leads to agents and keep status updated.',
+            'Agent' => 'Work only on the leads assigned to you and update status as you progress.',
+            default => 'Match the incoming queue with the right manager, employee, and status.',
+        };
+    }
+
+    private function isOwner(User $user): bool
+    {
+        return $user->role === 'Admin/Owner';
+    }
+
+    private function isManager(User $user): bool
+    {
+        return $user->role === 'Manager';
+    }
+
+    private function isAgent(User $user): bool
+    {
+        return $user->role === 'Agent';
     }
 
     private function formatDate(mixed $value): string

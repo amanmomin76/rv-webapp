@@ -13,7 +13,7 @@
                 <div class="crm-brand-mark">LF</div>
                 <div class="crm-brand-copy">
                     <h1>{{ $appTitle }}</h1>
-                    <p>Owner dashboard</p>
+                    <p>{{ $currentUserRole }} workspace</p>
                 </div>
             </div>
 
@@ -58,7 +58,7 @@
                         </div>
                         <div class="crm-notice-badge">NT</div>
                         <div class="crm-user-card">
-                            <div class="crm-user-avatar">OW</div>
+                            <div class="crm-user-avatar">{{ $currentUserInitials }}</div>
                             <div>
                                 <p class="name">{{ $currentUserName }}</p>
                                 <p class="role">{{ $currentUserRole }}</p>

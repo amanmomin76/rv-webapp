@@ -19,7 +19,9 @@
                 </div>
                 <div class="summary-chip">{{ $followUps['count_summary'] }}</div>
                 <button class="primary-button" type="submit">Filter</button>
-                <button class="secondary-button" type="button">+ Add Follow-up</button>
+                @if ($followUps['can_add_follow_up'])
+                    <button class="secondary-button" type="button">+ Add Follow-up</button>
+                @endif
             </form>
         </div>
     </div>

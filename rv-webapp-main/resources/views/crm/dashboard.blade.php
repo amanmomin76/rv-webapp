@@ -4,7 +4,7 @@
     <div class="crm-panel">
         <div class="page-header-grid">
             <div>
-                <p class="crm-kicker">OWNER OVERVIEW</p>
+                <p class="crm-kicker">{{ $dashboard['kicker'] }}</p>
                 <h3>{{ $dashboard['title'] }}</h3>
                 <p>{{ $dashboard['subtitle'] }}</p>
             </div>

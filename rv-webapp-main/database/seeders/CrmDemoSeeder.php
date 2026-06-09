@@ -111,6 +111,20 @@ class CrmDemoSeeder extends Seeder
             return [$user['email'] => $model];
         });
 
+        $managerMap = [
+            'neha.verma@leadflowcrm.com' => 'rahul.sharma@leadflowcrm.com',
+            'pooja.shah@leadflowcrm.com' => 'rahul.sharma@leadflowcrm.com',
+            'sanjay.patel@leadflowcrm.com' => 'anil.kumar@leadflowcrm.com',
+            'vikram.singh@leadflowcrm.com' => 'anil.kumar@leadflowcrm.com',
+            'arjun.desai@leadflowcrm.com' => 'anil.kumar@leadflowcrm.com',
+        ];
+
+        foreach ($managerMap as $employeeEmail => $managerEmail) {
+            $users[$employeeEmail]->forceFill([
+                'manager_id' => $users[$managerEmail]->id,
+            ])->save();
+        }
+
         $leads = collect([
                 $this->lead('LF2601', 'Rahul Patel', 'Patel Industries', 'rahul@patelindustries.in', 'Ahmedabad', 'Gujarat', 'India', 'Manufacturer', '24AAACP1111A1Z8 / patelindustries.in', 'IndiaMART', 'New', 'rahul.sharma@leadflowcrm.com', '2026-01-12 10:15:00', 'Need a multi-head weighing machine with PLC support.', 'Multi-head Weigher', '2 Units', 'Rs 12,00,000', '45 Days', 'Packaging Machinery'),
                 $this->lead('LF2602', 'Amit Singh', 'Singh Trading', 'amit@singhtrading.in', 'Kanpur', 'Uttar Pradesh', 'India', 'Trader', '09AABCS2222C1Z6 / singhtrading.in', 'Website', 'Contacted', 'anil.kumar@leadflowcrm.com', '2026-01-26 14:20:00', 'Looking for a cost-effective powder filling setup with AMC support.', 'Powder Filling Machine', '1 Line', 'Rs 8,50,000', '30 Days', 'Filling Systems'),

@@ -21,10 +21,18 @@
             </div>
 
             <div class="hero-actions">
-                <button class="secondary-button" type="button">Edit Lead</button>
-                <button class="success-button" type="button">Assign Project</button>
-                <button class="secondary-button" type="button">Add Followup</button>
-                <button class="secondary-button" type="button">Upload Document</button>
+                @if ($leadDetails['can_edit_lead'])
+                    <button class="secondary-button" type="button">Edit Lead</button>
+                @endif
+                @if ($leadDetails['can_assign_project'])
+                    <button class="success-button" type="button">Assign Project</button>
+                @endif
+                @if ($leadDetails['can_add_follow_up'])
+                    <button class="secondary-button" type="button">Add Followup</button>
+                @endif
+                @if ($leadDetails['can_upload_document'])
+                    <button class="secondary-button" type="button">Upload Document</button>
+                @endif
             </div>
         </div>
     </div>
@@ -121,7 +129,11 @@
                             <span class="field-value">{{ $leadDetails['current_lead']['lead_status'] }}</span>
                         </div>
                         <div class="field-block">
-                            <span class="field-label">Assigned To</span>
+                            <span class="field-label">Manager</span>
+                            <span class="field-value">{{ $leadDetails['current_lead']['lead_manager'] }}</span>
+                        </div>
+                        <div class="field-block">
+                            <span class="field-label">Employee</span>
                             <span class="field-value">{{ $leadDetails['current_lead']['lead_assigned_to'] }}</span>
                         </div>
                     </div>
